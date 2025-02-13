@@ -4,6 +4,7 @@
 
 #include <chrono>
 #include <iostream>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -89,7 +90,9 @@ public:
     };
 
     ~CollatzClasses() {
-        fclose(sieve_fptr_);
+        if (sieve_fptr_ != NULL) {
+            fclose(sieve_fptr_);
+        }
     }
 
     CollatzClass operator[](size_t idx) const {
