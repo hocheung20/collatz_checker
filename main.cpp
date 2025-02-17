@@ -3,6 +3,7 @@
 #include <stdio.h>
 
 #include <chrono>
+#include <cstring>
 #include <iostream>
 #include <filesystem>
 #include <fstream>
@@ -59,7 +60,10 @@ const int_type max_sieve_size = pow2(max_k_mpz);
 
 class CollatzClasses {
 public:
-    CollatzClasses(int k) : k_(k) {
+    CollatzClasses(int k) :
+    k_(k),
+    f_k_b_len_(k_ < 40 ? 20 : 22)
+    {
 //        std::filesystem::path base("/Volumes/tank/collatz");
         std::filesystem::path base("/Volumes/980Pro2TB");
 
@@ -70,6 +74,7 @@ public:
         std::stringstream sieve_filename_ss;
         sieve_filename_ss << "sieve_2^" << k << ".txt";
         auto sieve_file_path = base / sieve_filename_ss.str();
+
         sieve_fptr_ = fopen(sieve_file_path.c_str(), "r");
         if (sieve_fptr_ == NULL) {
             throw std::runtime_error("Unable to open sieve file");
@@ -85,6 +90,7 @@ public:
     CollatzClasses & operator=(CollatzClasses && other) {
         std::swap(k_, other.k_);
         std::swap(sieve_fptr_, other.sieve_fptr_);
+        std::swap(f_k_b_len_, other.f_k_b_len_);
 
         return *this;
     };
@@ -96,22 +102,31 @@ public:
     }
 
     CollatzClass operator[](size_t idx) const {
-        const off_t stride = 5 + 1 + 20 + 1; // c (5 bytes) + <space> + f_k_b (16 bytes) + "\n";
+        // TODO remove hardcode printf_specifier
+        char f_k_b_buf[f_k_b_len_+1];
+        const off_t stride = 5 + 1 + f_k_b_len_ + 1; // c (5 bytes) + <space> + f_k_b + "\n";
+
         if (fseek(sieve_fptr_, stride * idx, SEEK_SET) != 0) {
             throw std::runtime_error(strerror(errno));
         }
-        uint16_t c = 0;
-        char f_k_b[17];
-        if (fscanf(sieve_fptr_, "%5" PRIu16 " %16s", &c, &f_k_b) == EOF) {
-            throw std::runtime_error("fscanf returned EOF");
-        }
 
-        return CollatzClass{c, int_type(f_k_b, 10)};
+        uint16_t c = 0;
+        char buf[stride];
+        memset(buf, '\0', sizeof(buf));
+        fread(buf, stride, 1, sieve_fptr_);
+        if (sscanf(buf, k_ < 40 ? legacy_printf_specifier_ : printf_specifier_, &c, f_k_b_buf) == EOF) {
+            throw std::runtime_error("sscanf returned EOF");
+        }
+        return CollatzClass{c, int_type(f_k_b_buf, 10)};
     }
 
 private:
     FILE * sieve_fptr_ = NULL;
+
     int k_;
+    const char * legacy_printf_specifier_ = "%5" PRIu16 " %20s";
+    const char * printf_specifier_ = "%5" PRIu16 " %22s";
+    size_t f_k_b_len_;
 };
 
 class CollatzClassesByK {
@@ -214,9 +229,8 @@ int main() {
     const int_type batch_size = 32768_mpz;
     const int_type max_test_num = 23589095998679804297590_mpz;
     for (int_type test_num = global_peak_result.num; test_num < max_test_num; test_num += (2 * batch_size)) {
-
         auto test_func = [test_num, max_test_num, batch_size]() -> std::vector<NumPeakResult> {
-            CollatzClassesByK collatz_classes_by_k;
+            static thread_local CollatzClassesByK collatz_classes_by_k;
             std::vector<NumPeakResult> peak_results;
             for (int_type batch_test_num = test_num; (batch_test_num < (test_num + 2 * batch_size)) && (batch_test_num < max_test_num); batch_test_num+=2) {
                 NumPeakResult peak_result{batch_test_num,0,0};
