@@ -32,8 +32,9 @@ bool is_even(const int_type & k) {
 }
 
 int_type pow2(int_type exp) {
+    static const int_type one = 1_mpz;
     int_type res;
-    mpz_mul_2exp(res.get_mpz_t(), (1_mpz).get_mpz_t(), exp.get_ui());
+    mpz_mul_2exp(res.get_mpz_t(), one.get_mpz_t(), exp.get_ui());
     return res;
 }
 
@@ -50,11 +51,14 @@ int_type u64tompz(uint64_t u64)
 
 struct CollatzClass {
     uint16_t c; // c is the number of increases
-    int_type f_k_b;
+    uint64_t f_k_b;
 };
 
 namespace {
-const constexpr uint64_t max_k = 36;
+const constexpr uint64_t max_k = 20;  // fits inside L2 cache
+//const constexpr uint64_t max_k = 24;   fits inside L2 cache of 16 cores
+//const constexpr uint64_t max_k = 32; // fits inside 128 GiB memory
+
 const int_type max_k_mpz = u64tompz(max_k);
 const int_type max_sieve_size = pow2(max_k_mpz);
 
@@ -75,57 +79,43 @@ public:
         sieve_filename_ss << "sieve_2^" << k << ".txt";
         auto sieve_file_path = base / sieve_filename_ss.str();
 
-        sieve_fptr_ = fopen(sieve_file_path.c_str(), "r");
-        if (sieve_fptr_ == NULL) {
-            throw std::runtime_error("Unable to open sieve file");
+        FILE * sieve_fptr = fopen(sieve_file_path.c_str(), "r");
+        if (sieve_fptr == NULL) {
+            throw std::runtime_error("Unable to open sieve file" + sieve_file_path.string());
         }
-    }
 
-    CollatzClasses(const CollatzClasses &) = delete;
-    CollatzClasses(CollatzClasses && other) {
-        operator=(std::move(other));
-    }
+        const off_t stride = 5 + 1 + f_k_b_len_ + 1;
+        char buf[stride + 1]; memset(buf, '\0', sizeof(buf));
+        uint16_t c;
+        uint64_t f_k_b;
 
-    CollatzClasses & operator=(const CollatzClasses &) = delete;
-    CollatzClasses & operator=(CollatzClasses && other) {
-        std::swap(k_, other.k_);
-        std::swap(sieve_fptr_, other.sieve_fptr_);
-        std::swap(f_k_b_len_, other.f_k_b_len_);
-
-        return *this;
-    };
-
-    ~CollatzClasses() {
-        if (sieve_fptr_ != NULL) {
-            fclose(sieve_fptr_);
+        while (fgets(buf, stride + 1, sieve_fptr) != NULL) {
+            if (k < 40) {
+                if (sscanf(buf, legacy_printf_specifier_, &c, &f_k_b) == EOF) {
+                    throw std::runtime_error("legacy sscanf failed");
+                }
+            } else {
+                if (sscanf(buf, printf_specifier_, &c, &f_k_b) == EOF) {
+                    throw std::runtime_error("sscanf failed");
+                }
+            }
+            collatz_classes_.emplace_back(CollatzClass{c, f_k_b});
         }
+
+        fclose(sieve_fptr);
     }
+
 
     CollatzClass operator[](size_t idx) const {
-        // TODO remove hardcode printf_specifier
-        char f_k_b_buf[f_k_b_len_+1];
-        const off_t stride = 5 + 1 + f_k_b_len_ + 1; // c (5 bytes) + <space> + f_k_b + "\n";
-
-        if (fseek(sieve_fptr_, stride * idx, SEEK_SET) != 0) {
-            throw std::runtime_error(strerror(errno));
-        }
-
-        uint16_t c = 0;
-        char buf[stride];
-        memset(buf, '\0', sizeof(buf));
-        fread(buf, stride, 1, sieve_fptr_);
-        if (sscanf(buf, k_ < 40 ? legacy_printf_specifier_ : printf_specifier_, &c, f_k_b_buf) == EOF) {
-            throw std::runtime_error("sscanf returned EOF");
-        }
-        return CollatzClass{c, int_type(f_k_b_buf, 10)};
+        return collatz_classes_[idx];
     }
 
 private:
-    FILE * sieve_fptr_ = NULL;
+    std::vector<CollatzClass> collatz_classes_;
 
     int k_;
-    const char * legacy_printf_specifier_ = "%5" PRIu16 " %20s";
-    const char * printf_specifier_ = "%5" PRIu16 " %22s";
+    const char * legacy_printf_specifier_ = "%5hu %20llu";
+    const char * printf_specifier_ = "%5hu %22llu";
     size_t f_k_b_len_;
 };
 
@@ -168,31 +158,22 @@ int_type collatz(int_type test_num, int_type steps, const CollatzClassesByK & co
     }
 
     if (steps > max_k_mpz) {
-        int_type res = collatz(test_num, max_k_mpz, collatz_classes_by_k);
+        const int_type res = collatz(test_num, max_k_mpz, collatz_classes_by_k);
         return collatz(res, steps - max_k_mpz, collatz_classes_by_k);
     }
 
-    //size_t num_size_in_bits = mpz_sizeinbase(test_num.get_mpz_t(), 2);
-    int_type A, B;
-
-    if (steps <= max_k_mpz) {
-        const int_type sieve_size = pow2(steps);
-        A = test_num / sieve_size;
-        B = test_num % sieve_size;
-    } else { // test_num is greater than our max sieve
-        A = test_num / max_sieve_size;
-        B = test_num - max_sieve_size;
-    }
+    const int_type sieve_size = pow2(steps);
+    const int_type A = test_num / sieve_size;
+    const int_type B = test_num % sieve_size;
 
     const CollatzClass & collatz_class = collatz_classes_by_k[steps.get_ui()][int_type(B / 2).get_ui()];
     uint16_t c = collatz_class.c;
-    int_type f_k_b = collatz_class.f_k_b;
+    const int_type f_k_b = u64tompz(collatz_class.f_k_b);
 
     int_type res;
     mpz_ui_pow_ui(res.get_mpz_t(), 3, c);
     res = A * res;
     res += f_k_b;
-//    std::cout << test_num << " " << sieve_k << " " << steps << " " << A << " " << B << " " << c << " " << f_k_b << " " << res << std::endl;
 
     return res;
 }
@@ -207,8 +188,11 @@ int main() {
     };
 
     ParallelExecutorWithMaxPendingTasks<std::vector<NumPeakResult>> tp(std::thread::hardware_concurrency()-1, 32);
+//    ParallelExecutorWithMaxPendingTasks<std::vector<NumPeakResult>> tp(1, 1);
 
-//    NumPeakResult global_peak_result{2358909599867980429759_mpz,494114680693632162318569565806744468898092_mpz,0};
+
+//    NumPeakResult global_peak_result{2358909599867980429759_mpz,0_mpz,0};
+//    uint64_t global_peak_result_number = 97;
     NumPeakResult global_peak_result{3_mpz,0_mpz,0};
     uint64_t global_peak_result_number = 2;
     std::thread check_peak_result_thread([&tp, &global_peak_result, &global_peak_result_number](){
@@ -216,21 +200,19 @@ int main() {
             const auto & peak_results = *peak_results_opt;
             for (const auto & peak_result : peak_results) {
                 if (peak_result.peak > global_peak_result.peak) {
-                    if (peak_result.num > global_peak_result.num) {
-                        ++global_peak_result_number;
-                    }
                     std::cout << global_peak_result_number << ": collatz^" << peak_result.steps << "(" << peak_result.num << ") = " << peak_result.peak << std::endl;
                     global_peak_result = peak_result;
+                    ++global_peak_result_number;
                 }
             }
         }
     });
 
-    const int_type batch_size = 32768_mpz;
+    const int_type batch_size = 65536_mpz;
     const int_type max_test_num = 23589095998679804297590_mpz;
+    CollatzClassesByK collatz_classes_by_k;
     for (int_type test_num = global_peak_result.num; test_num < max_test_num; test_num += (2 * batch_size)) {
-        auto test_func = [test_num, max_test_num, batch_size]() -> std::vector<NumPeakResult> {
-            static thread_local CollatzClassesByK collatz_classes_by_k;
+        auto test_func = [&collatz_classes_by_k, test_num, max_test_num, batch_size]() -> std::vector<NumPeakResult> {
             std::vector<NumPeakResult> peak_results;
             for (int_type batch_test_num = test_num; (batch_test_num < (test_num + 2 * batch_size)) && (batch_test_num < max_test_num); batch_test_num+=2) {
                 NumPeakResult peak_result{batch_test_num,0,0};
@@ -247,10 +229,11 @@ int main() {
                         if (res > peak_result.peak) {
                             peak_result.peak = res;
                             peak_result.steps = steps;
-                            peak_results.emplace_back(peak_result);
                         }
                     }
                 }
+
+                peak_results.emplace_back(peak_result);
             }
 
             return peak_results;
