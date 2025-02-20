@@ -55,10 +55,7 @@ struct CollatzClass {
 };
 
 namespace {
-const constexpr uint64_t max_k = 20;  // fits inside L2 cache
-//const constexpr uint64_t max_k = 24;   fits inside L2 cache of 16 cores
-//const constexpr uint64_t max_k = 32; // fits inside 128 GiB memory
-
+const constexpr uint64_t max_k = 39;
 const int_type max_k_mpz = u64tompz(max_k);
 const int_type max_sieve_size = pow2(max_k_mpz);
 
@@ -69,7 +66,7 @@ public:
     f_k_b_len_(k_ < 40 ? 20 : 22)
     {
 //        std::filesystem::path base("/Volumes/tank/collatz");
-        std::filesystem::path base("/Volumes/980Pro2TB");
+        std::filesystem::path base("/mnt/tank/collatz");
 
         if (!is_directory(base)) {
             throw std::runtime_error("Base is not a directory!");
@@ -79,39 +76,62 @@ public:
         sieve_filename_ss << "sieve_2^" << k << ".txt";
         auto sieve_file_path = base / sieve_filename_ss.str();
 
-        FILE * sieve_fptr = fopen(sieve_file_path.c_str(), "r");
-        if (sieve_fptr == NULL) {
+        sieve_fptr_ = fopen(sieve_file_path.c_str(), "r");
+        if (sieve_fptr_ == NULL) {
             throw std::runtime_error("Unable to open sieve file" + sieve_file_path.string());
         }
+    }
 
+    CollatzClasses(const CollatzClasses &) = delete;
+    CollatzClasses& operator=(const CollatzClasses &) = delete;
+
+    CollatzClasses(CollatzClasses && other) {
+        operator=(std::move(other));
+    }
+
+    CollatzClasses& operator=(CollatzClasses && other) {
+        std::swap(sieve_fptr_, other.sieve_fptr_);
+        std::swap(k_, other.k_);
+        std::swap(f_k_b_len_, other.f_k_b_len_);
+        return *this;
+    }
+
+    ~CollatzClasses() {
+        if (sieve_fptr_ != NULL) {
+            fclose(sieve_fptr_);
+        }
+
+        sieve_fptr_ = NULL;
+    }
+
+    CollatzClass operator[](size_t idx) const {
         const off_t stride = 5 + 1 + f_k_b_len_ + 1;
+        if (0 != fseek(sieve_fptr_, idx * stride, SEEK_SET)) {
+            throw std::runtime_error("fseek failed");
+        }
+
         char buf[stride + 1]; memset(buf, '\0', sizeof(buf));
         uint16_t c;
         uint64_t f_k_b;
-
-        while (fgets(buf, stride + 1, sieve_fptr) != NULL) {
-            if (k < 40) {
-                if (sscanf(buf, legacy_printf_specifier_, &c, &f_k_b) == EOF) {
-                    throw std::runtime_error("legacy sscanf failed");
-                }
-            } else {
-                if (sscanf(buf, printf_specifier_, &c, &f_k_b) == EOF) {
-                    throw std::runtime_error("sscanf failed");
-                }
-            }
-            collatz_classes_.emplace_back(CollatzClass{c, f_k_b});
+        if (1 != fread(buf, stride, 1, sieve_fptr_)) {
+            throw std::runtime_error("fread faild");
         }
 
-        fclose(sieve_fptr);
-    }
+        if (k_ < 40) {
+            if (sscanf(buf, legacy_printf_specifier_, &c, &f_k_b) == EOF) {
+                throw std::runtime_error("legacy sscanf failed");
+            }
+        } else {
+            if (scanf(buf, printf_specifier_, &c, &f_k_b) == EOF) {
+                throw std::runtime_error("sscanf failed");
+            }
+        }
 
-
-    CollatzClass operator[](size_t idx) const {
-        return collatz_classes_[idx];
+        return CollatzClass{c, f_k_b};
     }
 
 private:
-    std::vector<CollatzClass> collatz_classes_;
+    FILE * sieve_fptr_ = NULL;
 
     int k_;
     const char * legacy_printf_specifier_ = "%5hu %20llu";
@@ -187,7 +207,7 @@ int main() {
         int_type steps;
     };
 
-    ParallelExecutorWithMaxPendingTasks<std::vector<NumPeakResult>> tp(std::thread::hardware_concurrency()-1, 32);
+    ParallelExecutorWithMaxPendingTasks<std::vector<NumPeakResult>> tp(15, 32);
 //    ParallelExecutorWithMaxPendingTasks<std::vector<NumPeakResult>> tp(1, 1);
 
 
@@ -208,11 +228,11 @@ int main() {
         }
     });
 
-    const int_type batch_size = 65536_mpz;
+    const int_type batch_size = 1024_mpz;
     const int_type max_test_num = 23589095998679804297590_mpz;
-    CollatzClassesByK collatz_classes_by_k;
     for (int_type test_num = global_peak_result.num; test_num < max_test_num; test_num += (2 * batch_size)) {
-        auto test_func = [&collatz_classes_by_k, test_num, max_test_num, batch_size]() -> std::vector<NumPeakResult> {
+        auto test_func = [test_num, max_test_num, batch_size]() -> std::vector<NumPeakResult> {
+            CollatzClassesByK collatz_classes_by_k;
             std::vector<NumPeakResult> peak_results;
             for (int_type batch_test_num = test_num; (batch_test_num < (test_num + 2 * batch_size)) && (batch_test_num < max_test_num); batch_test_num+=2) {
                 NumPeakResult peak_result{batch_test_num,0,0};

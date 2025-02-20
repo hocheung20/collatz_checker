@@ -8,8 +8,9 @@ SET(CMAKE_C_STANDARD 11)
 find_package(GMP REQUIRED)
 find_package(Boost CONFIG REQUIRED system)
 find_package(ParallelExecutorWithMaxPendingTasks REQUIRED)
+find_package(Threads REQUIRED)
 
 ADD_EXECUTABLE(collatz_checker main.cpp)
 
 TARGET_INCLUDE_DIRECTORIES(collatz_checker PRIVATE ${GMP_INCLUDES} ${Boost_INCLUDE_DIR} ${ParallelExecutorWithMaxPendingTasks_INCLUDES})
-TARGET_LINK_LIBRARIES(collatz_checker ${GMP_LIBRARIES} ${Boost_LIBRARIES})
+TARGET_LINK_LIBRARIES(collatz_checker ${GMP_LIBRARIES} ${Boost_LIBRARIES} Threads::Threads)
