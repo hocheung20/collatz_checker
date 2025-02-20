@@ -6,7 +6,7 @@ SET(CMAKE_CXX_STANDARD 17)
 SET(CMAKE_C_STANDARD 11)
 
 find_package(GMP REQUIRED)
-find_package(Boost CONFIG REQUIRED system)
+find_package(Boost CONFIG REQUIRED system iostreams)
 find_package(ParallelExecutorWithMaxPendingTasks REQUIRED)
 find_package(Threads REQUIRED)
 

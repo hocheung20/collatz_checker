@@ -2,6 +2,8 @@
 #include <locale.h>
 #include <stdio.h>
 
+#include <sys/mman.h>
+
 #include <chrono>
 #include <cstring>
 #include <iostream>
@@ -12,6 +14,8 @@
 
 #include "gmp.h"
 #include "gmpxx.h"
+
+#include "boost/iostreams/device/mapped_file.hpp"
 
 #include "ParallelExecutorWithMaxPendingTasks.hpp"
 
@@ -55,7 +59,7 @@ struct CollatzClass {
 };
 
 namespace {
-const constexpr uint64_t max_k = 39;
+const constexpr uint64_t max_k = 30;
 const int_type max_k_mpz = u64tompz(max_k);
 const int_type max_sieve_size = pow2(max_k_mpz);
 
@@ -65,8 +69,8 @@ public:
     k_(k),
     f_k_b_len_(k_ < 40 ? 20 : 22)
     {
-//        std::filesystem::path base("/Volumes/tank/collatz");
-        std::filesystem::path base("/mnt/tank/collatz");
+        std::filesystem::path base("/Volumes/tank/collatz");
+//        std::filesystem::path base("/mnt/tank/collatz");
 
         if (!is_directory(base)) {
             throw std::runtime_error("Base is not a directory!");
@@ -76,46 +80,17 @@ public:
         sieve_filename_ss << "sieve_2^" << k << ".txt";
         auto sieve_file_path = base / sieve_filename_ss.str();
 
-        sieve_fptr_ = fopen(sieve_file_path.c_str(), "r");
-        if (sieve_fptr_ == NULL) {
-            throw std::runtime_error("Unable to open sieve file" + sieve_file_path.string());
-        }
-    }
-
-    CollatzClasses(const CollatzClasses &) = delete;
-    CollatzClasses& operator=(const CollatzClasses &) = delete;
-
-    CollatzClasses(CollatzClasses && other) {
-        operator=(std::move(other));
-    }
-
-    CollatzClasses& operator=(CollatzClasses && other) {
-        std::swap(sieve_fptr_, other.sieve_fptr_);
-        std::swap(k_, other.k_);
-        std::swap(f_k_b_len_, other.f_k_b_len_);
-        return *this;
-    }
-
-    ~CollatzClasses() {
-        if (sieve_fptr_ != NULL) {
-            fclose(sieve_fptr_);
-        }
-
-        sieve_fptr_ = NULL;
+        mfs_.open(sieve_file_path);
+        posix_madvise((void *)mfs_.data(), mfs_.size(), POSIX_MADV_RANDOM);
     }
 
     CollatzClass operator[](size_t idx) const {
         const off_t stride = 5 + 1 + f_k_b_len_ + 1;
-        if (0 != fseek(sieve_fptr_, idx * stride, SEEK_SET)) {
-            throw std::runtime_error("fseek failed");
-        }
 
         char buf[stride + 1]; memset(buf, '\0', sizeof(buf));
         uint16_t c;
         uint64_t f_k_b;
-        if (1 != fread(buf, stride, 1, sieve_fptr_)) {
-            throw std::runtime_error("fread faild");
-        }
+        memcpy(buf, mfs_.data() + (idx * stride), stride);
 
         if (k_ < 40) {
             if (sscanf(buf, legacy_printf_specifier_, &c, &f_k_b) == EOF) {
@@ -131,7 +106,7 @@ public:
     }
 
 private:
-    FILE * sieve_fptr_ = NULL;
+    boost::iostreams::mapped_file_source mfs_;
 
     int k_;
     const char * legacy_printf_specifier_ = "%5hu %20llu";
@@ -207,7 +182,7 @@ int main() {
         int_type steps;
     };
 
-    ParallelExecutorWithMaxPendingTasks<std::vector<NumPeakResult>> tp(15, 32);
+    ParallelExecutorWithMaxPendingTasks<std::vector<NumPeakResult>> tp(16, 32);
 //    ParallelExecutorWithMaxPendingTasks<std::vector<NumPeakResult>> tp(1, 1);
 
 
@@ -228,11 +203,11 @@ int main() {
         }
     });
 
-    const int_type batch_size = 1024_mpz;
+    CollatzClassesByK collatz_classes_by_k;
+    const int_type batch_size = 131072_mpz;
     const int_type max_test_num = 23589095998679804297590_mpz;
     for (int_type test_num = global_peak_result.num; test_num < max_test_num; test_num += (2 * batch_size)) {
-        auto test_func = [test_num, max_test_num, batch_size]() -> std::vector<NumPeakResult> {
-            CollatzClassesByK collatz_classes_by_k;
+        auto test_func = [&collatz_classes_by_k, test_num, max_test_num, batch_size]() -> std::vector<NumPeakResult> {
             std::vector<NumPeakResult> peak_results;
             for (int_type batch_test_num = test_num; (batch_test_num < (test_num + 2 * batch_size)) && (batch_test_num < max_test_num); batch_test_num+=2) {
                 NumPeakResult peak_result{batch_test_num,0,0};
