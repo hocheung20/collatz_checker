@@ -69,8 +69,7 @@ public:
     k_(k),
     f_k_b_len_(k_ < 40 ? 20 : 22)
     {
-//        std::filesystem::path base("/Volumes/tank/collatz");
-        std::filesystem::path base("/mnt/collatz");
+        std::filesystem::path base("/Volumes/tank/collatz");
 
         if (!is_directory(base)) {
             throw std::runtime_error("Base is not a directory!");
