@@ -59,7 +59,7 @@ struct CollatzClass {
 };
 
 namespace {
-const constexpr uint64_t max_k = 30;
+const constexpr uint64_t max_k = 37;
 const int_type max_k_mpz = u64tompz(max_k);
 const int_type max_sieve_size = pow2(max_k_mpz);
 
@@ -69,8 +69,8 @@ public:
     k_(k),
     f_k_b_len_(k_ < 40 ? 20 : 22)
     {
-        std::filesystem::path base("/Volumes/tank/collatz");
-//        std::filesystem::path base("/mnt/tank/collatz");
+//        std::filesystem::path base("/Volumes/tank/collatz");
+        std::filesystem::path base("/mnt/collatz");
 
         if (!is_directory(base)) {
             throw std::runtime_error("Base is not a directory!");
@@ -182,7 +182,7 @@ int main() {
         int_type steps;
     };
 
-    ParallelExecutorWithMaxPendingTasks<std::vector<NumPeakResult>> tp(16, 32);
+    ParallelExecutorWithMaxPendingTasks<std::vector<NumPeakResult>> tp(48, 96);
 //    ParallelExecutorWithMaxPendingTasks<std::vector<NumPeakResult>> tp(1, 1);
 
 
@@ -204,7 +204,7 @@ int main() {
     });
 
     CollatzClassesByK collatz_classes_by_k;
-    const int_type batch_size = 131072_mpz;
+    const int_type batch_size = 32768_mpz;
     const int_type max_test_num = 23589095998679804297590_mpz;
     for (int_type test_num = global_peak_result.num; test_num < max_test_num; test_num += (2 * batch_size)) {
         auto test_func = [&collatz_classes_by_k, test_num, max_test_num, batch_size]() -> std::vector<NumPeakResult> {
