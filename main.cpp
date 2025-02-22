@@ -59,9 +59,25 @@ struct CollatzAccelClass {
 };
 
 namespace {
-const constexpr uint64_t max_k = 37;
-const int_type max_k_mpz = u64tompz(max_k);
-const int_type max_sieve_size = pow2(max_k_mpz);
+const constexpr uint64_t MAX_K = 32;
+const constexpr size_t ADVISE_RANDOM_ABOVE_K = 33;
+const constexpr size_t MAX_K_FOR_CACHE = 32;
+
+class CollatzSieve {
+public:
+    bool need_to_test(int_type test_num) {
+        for (auto & [A, B] : sieve_list_) {
+            if (((test_num - B) % A) == 0) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+private:
+    std::vector<std::pair<size_t, size_t>> sieve_list_ = {{9, 2}, {9, 4}, {9, 5}, {9, 8}, {8, 5}};
+};
 
 class CollatzAccelClasses {
 public:
@@ -80,14 +96,32 @@ public:
         auto sieve_file_path = base / sieve_filename_ss.str();
 
         mfs_.open(sieve_file_path);
-        if (k > 33) {
+        if (k > ADVISE_RANDOM_ABOVE_K) {
             posix_madvise((void *)mfs_.data(), mfs_.size(), POSIX_MADV_RANDOM);
+        } else if (k_ <= MAX_K_FOR_CACHE){
+            posix_madvise((void *)mfs_.data(), mfs_.size(), POSIX_MADV_DONTNEED);
+            const size_t cache_size = pow2(u64tompz(k_-1)).get_ui();
+            cache_.reserve(cache_size);
+
+            for (size_t i = 0; i < cache_size; ++i) {
+                cache_.emplace_back(read_collatz_accel_class_from_file(i));
+            }
+            mfs_.close();
         } else {
             posix_madvise((void *)mfs_.data(), mfs_.size(), POSIX_MADV_WILLNEED);
         }
     }
 
     CollatzAccelClass operator[](size_t idx) const {
+        if (k_ <= MAX_K_FOR_CACHE) {
+            return cache_[idx];
+        }
+
+        return read_collatz_accel_class_from_file(idx);
+    }
+
+private:
+    CollatzAccelClass read_collatz_accel_class_from_file(size_t idx) const {
         const off_t stride = 5 + 1 + f_k_b_len_ + 1;
 
         char buf[stride + 1]; memset(buf, '\0', sizeof(buf));
@@ -111,6 +145,8 @@ public:
 private:
     boost::iostreams::mapped_file_source mfs_;
 
+    mutable std::vector<CollatzAccelClass> cache_;
+
     int k_;
     const char * legacy_printf_specifier_ = "%5hu %20llu";
     const char * printf_specifier_ = "%5hu %22llu";
@@ -120,7 +156,7 @@ private:
 class CollatzAccelClassesByK {
 public:
     CollatzAccelClassesByK() {
-        for (int k = 1; k <= max_k; ++k) {
+        for (int k = 1; k <= MAX_K; ++k) {
             collatz_accel_classes_by_k_.emplace_back(k);
         }
     }
@@ -137,7 +173,7 @@ private:
 
 
 // returns the collatz number after applying shortcut collatz function step number of times
-int_type collatz(int_type test_num, uint16_t steps, const CollatzAccelClassesByK & collatz_accel_classes_by_k) {
+int_type collatz(int_type test_num, int_type original_test_num, uint16_t steps, const CollatzAccelClassesByK & collatz_accel_classes_by_k) {
     if (steps == 0) {
         return test_num;
     }
@@ -152,12 +188,12 @@ int_type collatz(int_type test_num, uint16_t steps, const CollatzAccelClassesByK
     }
 
     if (test_num == 1) {
-        return collatz(4, steps - 1, collatz_accel_classes_by_k);
+        return collatz(4, original_test_num, steps - 1, collatz_accel_classes_by_k);
     }
 
-    if (steps > max_k) {
-        const int_type res = collatz(test_num, max_k, collatz_accel_classes_by_k);
-        return collatz(res, steps - max_k, collatz_accel_classes_by_k);
+    if (steps > MAX_K) {
+        const int_type res = collatz(test_num, original_test_num, MAX_K, collatz_accel_classes_by_k);
+        return collatz(res, original_test_num, steps - MAX_K, collatz_accel_classes_by_k);
     }
 
     const int_type sieve_size = pow2(steps);
@@ -207,37 +243,33 @@ int main() {
     });
 
     CollatzAccelClassesByK collatz_classes_by_k;
-    const int_type batch_size = 32768_mpz;
+    const int_type batch_size = 1048576_mpz;
     const int_type max_test_num = 23589095998679804297590_mpz;
     for (int_type test_num = global_peak_result.num; test_num < max_test_num; test_num += (2 * batch_size)) {
-        auto test_func = [&collatz_classes_by_k, test_num, max_test_num, batch_size]() -> std::vector<NumPeakResult> {
+        auto test_func = [&collatz_sieve, &collatz_classes_by_k, test_num, max_test_num, batch_size]() -> std::vector<NumPeakResult> {
             std::vector<NumPeakResult> peak_results;
             for (int_type batch_test_num = test_num; (batch_test_num < (test_num + 2 * batch_size)) && (batch_test_num < max_test_num); batch_test_num+=2) {
                 NumPeakResult peak_result{batch_test_num,0,0};
                 int_type res = batch_test_num;
 
-                if (batch_test_num % 3 == 2) {
-                    // Don't need check
-                } else if (batch_test_num % 8 == 5) {
-                    // Don't need check
-                } else  if (batch_test_num % 9 == 4) {
-                    // Don't need check
-                } else {
-                    for (uint16_t steps = 1; res >= test_num; ++steps) {
-                        if (steps == std::numeric_limits<decltype(steps)>::max()) {
-                            throw std::runtime_error("Steps would not fit in current representation");
-                        }
+                if (!collatz_sieve.need_to_test(batch_test_num)) {
+                    continue;
+                }
 
-                        res = collatz(batch_test_num, steps, collatz_classes_by_k);
+                for (uint16_t steps = 1; res >= test_num; ++steps) {
+                    if (steps == std::numeric_limits<decltype(steps)>::max()) {
+                        throw std::runtime_error("Steps would not fit in current representation");
+                    }
 
-                        if (res > peak_result.peak) {
-                            peak_result.peak = res;
-                            peak_result.steps = steps;
-                        }
+                    res = collatz(batch_test_num, batch_test_num, steps, collatz_classes_by_k);
+
+                    if (res > peak_result.peak) {
+                        peak_result.peak = res;
+                        peak_result.steps = steps;
                     }
                 }
 
-                peak_results.emplace_back(peak_result);
+                peak_results.emplace_back(std::move(peak_result));
             }
 
             return peak_results;
