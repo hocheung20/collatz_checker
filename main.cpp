@@ -53,7 +53,7 @@ int_type u64tompz(uint64_t u64)
     return z;
 }
 
-struct CollatzClass {
+struct CollatzAccelClass {
     uint16_t c; // c is the number of increases
     uint64_t f_k_b;
 };
@@ -63,9 +63,9 @@ const constexpr uint64_t max_k = 37;
 const int_type max_k_mpz = u64tompz(max_k);
 const int_type max_sieve_size = pow2(max_k_mpz);
 
-class CollatzClasses {
+class CollatzAccelClasses {
 public:
-    CollatzClasses(int k) :
+    CollatzAccelClasses(int k) :
     k_(k),
     f_k_b_len_(k_ < 40 ? 20 : 22)
     {
@@ -87,7 +87,7 @@ public:
         }
     }
 
-    CollatzClass operator[](size_t idx) const {
+    CollatzAccelClass operator[](size_t idx) const {
         const off_t stride = 5 + 1 + f_k_b_len_ + 1;
 
         char buf[stride + 1]; memset(buf, '\0', sizeof(buf));
@@ -105,7 +105,7 @@ public:
             }
         }
 
-        return CollatzClass{c, f_k_b};
+        return CollatzAccelClass{c, f_k_b};
     }
 
 private:
@@ -117,27 +117,27 @@ private:
     size_t f_k_b_len_;
 };
 
-class CollatzClassesByK {
+class CollatzAccelClassesByK {
 public:
-    CollatzClassesByK() {
+    CollatzAccelClassesByK() {
         for (int k = 1; k <= max_k; ++k) {
-            collatz_classes_by_k_.emplace_back(k);
+            collatz_accel_classes_by_k_.emplace_back(k);
         }
     }
 
-    const CollatzClasses & operator[](size_t idx) const {
-        return collatz_classes_by_k_[idx - 1];
+    const CollatzAccelClasses & operator[](size_t idx) const {
+        return collatz_accel_classes_by_k_[idx - 1];
     }
 
 
 private:
-    std::vector<CollatzClasses> collatz_classes_by_k_;
+    std::vector<CollatzAccelClasses> collatz_accel_classes_by_k_;
 };
 } // anonymous namespace
 
 
 // returns the collatz number after applying shortcut collatz function step number of times
-int_type collatz(int_type test_num, int_type steps, const CollatzClassesByK & collatz_classes_by_k) {
+int_type collatz(int_type test_num, uint16_t steps, const CollatzAccelClassesByK & collatz_accel_classes_by_k) {
     if (steps == 0) {
         return test_num;
     }
@@ -152,21 +152,21 @@ int_type collatz(int_type test_num, int_type steps, const CollatzClassesByK & co
     }
 
     if (test_num == 1) {
-        return collatz(4, steps - 1, collatz_classes_by_k);
+        return collatz(4, steps - 1, collatz_accel_classes_by_k);
     }
 
-    if (steps > max_k_mpz) {
-        const int_type res = collatz(test_num, max_k_mpz, collatz_classes_by_k);
-        return collatz(res, steps - max_k_mpz, collatz_classes_by_k);
+    if (steps > max_k) {
+        const int_type res = collatz(test_num, max_k, collatz_accel_classes_by_k);
+        return collatz(res, steps - max_k, collatz_accel_classes_by_k);
     }
 
     const int_type sieve_size = pow2(steps);
     const int_type A = test_num / sieve_size;
     const int_type B = test_num % sieve_size;
 
-    const CollatzClass & collatz_class = collatz_classes_by_k[steps.get_ui()][int_type(B / 2).get_ui()];
-    uint16_t c = collatz_class.c;
-    const int_type f_k_b = u64tompz(collatz_class.f_k_b);
+    const CollatzAccelClass & collatz_accel_class = collatz_accel_classes_by_k[steps][int_type(B / 2).get_ui()];
+    uint16_t c = collatz_accel_class.c;
+    const int_type f_k_b = u64tompz(collatz_accel_class.f_k_b);
 
     int_type res;
     mpz_ui_pow_ui(res.get_mpz_t(), 3, c);
@@ -206,7 +206,7 @@ int main() {
         }
     });
 
-    CollatzClassesByK collatz_classes_by_k;
+    CollatzAccelClassesByK collatz_classes_by_k;
     const int_type batch_size = 32768_mpz;
     const int_type max_test_num = 23589095998679804297590_mpz;
     for (int_type test_num = global_peak_result.num; test_num < max_test_num; test_num += (2 * batch_size)) {
