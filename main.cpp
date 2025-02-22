@@ -80,7 +80,11 @@ public:
         auto sieve_file_path = base / sieve_filename_ss.str();
 
         mfs_.open(sieve_file_path);
-        posix_madvise((void *)mfs_.data(), mfs_.size(), POSIX_MADV_RANDOM);
+        if (k > 33) {
+            posix_madvise((void *)mfs_.data(), mfs_.size(), POSIX_MADV_RANDOM);
+        } else {
+            posix_madvise((void *)mfs_.data(), mfs_.size(), POSIX_MADV_WILLNEED);
+        }
     }
 
     CollatzClass operator[](size_t idx) const {
