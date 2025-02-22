@@ -223,7 +223,11 @@ int main() {
                 } else  if (batch_test_num % 9 == 4) {
                     // Don't need check
                 } else {
-                    for (int_type steps = 1; res >= test_num; ++steps) {
+                    for (uint16_t steps = 1; res >= test_num; ++steps) {
+                        if (steps == std::numeric_limits<decltype(steps)>::max()) {
+                            throw std::runtime_error("Steps would not fit in current representation");
+                        }
+
                         res = collatz(batch_test_num, steps, collatz_classes_by_k);
 
                         if (res > peak_result.peak) {
