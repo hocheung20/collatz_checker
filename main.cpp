@@ -218,7 +218,9 @@ int main() {
 
                 if (batch_test_num % 3 == 2) {
                     // Don't need check
-                } else if (batch_test_num % 9 == 4) {
+                } else if (batch_test_num % 8 == 5) {
+                    // Don't need check
+                } else  if (batch_test_num % 9 == 4) {
                     // Don't need check
                 } else {
                     for (int_type steps = 1; res >= test_num; ++steps) {
